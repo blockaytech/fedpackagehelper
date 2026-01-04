@@ -1,0 +1,11 @@
+# FedRAMP Package Helper - Python Dependencies
+
+# Core - Required
+python-docx>=0.8.11      # Word document manipulation
+
+# Export - Optional (for Excel/CSV export features)
+pandas>=1.3.0            # Data manipulation and CSV export
+openpyxl>=3.0.0          # Excel file support
+
+# Note: If you don't need Excel/CSV export, you can install just:
+#   pip install python-docx

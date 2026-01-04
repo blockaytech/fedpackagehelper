@@ -1,0 +1,116 @@
+{
+  "_description": "Master dictionary of known terms for FedRAMP package documentation",
+  "_usage": "Copy this file to terms_dictionary.json and customize for your organization",
+
+  "known_technologies": {
+    "_description": "Security tools, cloud services, software, and platforms",
+    "terms": {
+      "Wiz": {"category": "security_scanning", "replacement": null},
+      "BurpSuite Enterprise": {"category": "dast", "replacement": null},
+      "CrowdStrike": {"category": "edr", "replacement": null},
+      "CrowdStrike Falcon": {"category": "edr", "replacement": null},
+      "Okta": {"category": "identity", "replacement": null},
+      "Okta FedRAMP": {"category": "identity", "replacement": null},
+      "Jira": {"category": "ticketing", "replacement": null},
+      "PagerDuty": {"category": "alerting", "replacement": null},
+      "Splunk": {"category": "siem", "replacement": null},
+      "AWS": {"category": "cloud", "replacement": null},
+      "Azure": {"category": "cloud", "replacement": null},
+      "Google Cloud": {"category": "cloud", "replacement": null},
+      "GCP": {"category": "cloud", "replacement": null},
+      "GitHub": {"category": "scm", "replacement": null},
+      "GitLab": {"category": "scm", "replacement": null},
+      "Terraform": {"category": "iac", "replacement": null},
+      "Ansible": {"category": "configuration", "replacement": null},
+      "Docker": {"category": "container", "replacement": null},
+      "Kubernetes": {"category": "container_orchestration", "replacement": null},
+      "Datadog": {"category": "monitoring", "replacement": null},
+      "New Relic": {"category": "monitoring", "replacement": null},
+      "Veracode": {"category": "security_scanning", "replacement": null},
+      "SonarQube": {"category": "sast", "replacement": null},
+      "Snyk": {"category": "security_scanning", "replacement": null},
+      "Qualys": {"category": "vulnerability_scanning", "replacement": null},
+      "Tenable": {"category": "vulnerability_scanning", "replacement": null},
+      "Nessus": {"category": "vulnerability_scanning", "replacement": null},
+      "ServiceNow": {"category": "itsm", "replacement": null},
+      "Slack": {"category": "communication", "replacement": null},
+      "Microsoft Teams": {"category": "communication", "replacement": null},
+      "1Password": {"category": "secrets", "replacement": null},
+      "HashiCorp Vault": {"category": "secrets", "replacement": null}
+    }
+  },
+
+  "known_teams": {
+    "_description": "Team and department names - customize for your organization",
+    "terms": {
+      "Security Operations Team": {"replacement": null},
+      "Security Office": {"replacement": null},
+      "Security Team": {"replacement": null},
+      "Engineering Team": {"replacement": null},
+      "Operations Team": {"replacement": null},
+      "Technical Operations": {"replacement": null},
+      "IT Team": {"replacement": null},
+      "Onboarding Team": {"replacement": null},
+      "Account Management Team": {"replacement": null},
+      "Change Review Board": {"replacement": null},
+      "Human Resources": {"replacement": null},
+      "HR": {"replacement": null},
+      "Incident Response Team": {"replacement": null},
+      "Compliance Team": {"replacement": null}
+    }
+  },
+
+  "known_positions": {
+    "_description": "Job titles and roles",
+    "terms": {
+      "Chief Information Security Officer": {"acronym": "CISO", "replacement": null},
+      "CISO": {"full_form": "Chief Information Security Officer", "replacement": null},
+      "Information System Security Officer": {"acronym": "ISSO", "replacement": null},
+      "ISSO": {"full_form": "Information System Security Officer", "replacement": null},
+      "Chief Technology Officer": {"acronym": "CTO", "replacement": null},
+      "CTO": {"full_form": "Chief Technology Officer", "replacement": null},
+      "Chief Executive Officer": {"acronym": "CEO", "replacement": null},
+      "CEO": {"full_form": "Chief Executive Officer", "replacement": null},
+      "Program Manager": {"acronym": "PM", "replacement": null},
+      "Account Manager": {"replacement": null},
+      "System Administrator": {"acronym": "SA", "replacement": null},
+      "System Administrators": {"replacement": null},
+      "Security Engineer": {"replacement": null},
+      "DevOps Engineer": {"replacement": null},
+      "Site Reliability Engineer": {"acronym": "SRE", "replacement": null}
+    }
+  },
+
+  "discovery_patterns": {
+    "_description": "Regex patterns to discover potential new terms in documents",
+    "technology_indicators": [
+      "(?:using|utilizes?|employs?|leverages?|deployed|implemented)\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)?)",
+      "([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)?)\\s+(?:tool|platform|service|solution|system|software)",
+      "(?:via|through|with)\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)?)"
+    ],
+    "team_indicators": [
+      "([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*\\s+(?:Team|Office|Department|Group|Division))",
+      "(?:the|by|to)\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*\\s+(?:Team|Office|Department))"
+    ],
+    "position_indicators": [
+      "((?:Chief|Senior|Lead|Principal|Director|Manager|Officer|Administrator|Engineer|Analyst)(?:\\s+[A-Z][a-zA-Z]+)+)",
+      "([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*\\s+(?:Manager|Director|Officer|Administrator|Engineer|Analyst))"
+    ]
+  },
+
+  "exclusions": {
+    "_description": "Terms to ignore during discovery (common words, control IDs, etc.)",
+    "terms": [
+      "The", "This", "That", "These", "Those", "When", "Where", "What", "Which",
+      "FedRAMP", "NIST", "Federal", "Government",
+      "Access Control", "Audit", "Configuration", "Contingency", "Incident",
+      "Information", "System", "Security", "Control", "Plan", "Policy",
+      "Procedure", "Process", "Management", "Assessment", "Authorization",
+      "Implementation Status", "Parameter AC", "Parameter AU", "Parameter CA",
+      "Parameter CM", "Parameter CP", "Parameter IA", "Parameter IR", "Parameter MA",
+      "Parameter MP", "Parameter PE", "Parameter PL", "Parameter PM", "Parameter PS",
+      "Parameter RA", "Parameter SA", "Parameter SC", "Parameter SI", "Parameter SR",
+      "Customer Responsibility", "Responsible Role", "Implementation Standard"
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "_instructions": "Copy this file to replacements.json and edit the replacement values",
+  "_delete_usage": "To DELETE a term entirely, set the value to 'DELETE' or 'REMOVE'",
+  "_notes": [
+    "Replacements are processed longest-first to prevent partial matches",
+    "Use whole words - 'Security' won't match inside 'SecurityTeam'",
+    "Review the preview output before applying changes"
+  ],
+
+  "replacements": {
+    "===== SECURITY TOOLS =====": "DELETE_THIS_LINE",
+    "Wiz": "YOUR_SECURITY_SCANNING_TOOL",
+    "CrowdStrike": "YOUR_EDR_TOOL",
+    "CrowdStrike Falcon": "YOUR_EDR_TOOL",
+    "BurpSuite Enterprise": "YOUR_DAST_TOOL",
+    "Splunk": "YOUR_SIEM_TOOL",
+    "Qualys": "YOUR_VULNERABILITY_SCANNER",
+
+    "===== IDENTITY & ACCESS =====": "DELETE_THIS_LINE",
+    "Okta": "YOUR_IDP",
+    "Okta FedRAMP": "YOUR_IDP_FEDRAMP",
+
+    "===== TICKETING & ALERTING =====": "DELETE_THIS_LINE",
+    "Jira": "YOUR_TICKETING_SYSTEM",
+    "PagerDuty": "YOUR_ALERTING_SYSTEM",
+    "ServiceNow": "YOUR_ITSM_SYSTEM",
+
+    "===== TEAMS =====": "DELETE_THIS_LINE",
+    "Security Operations Team": "YOUR_SECURITY_OPS_TEAM",
+    "Security Office": "YOUR_SECURITY_OFFICE",
+    "Engineering Team": "YOUR_ENGINEERING_TEAM",
+    "Operations Team": "YOUR_OPS_TEAM",
+    "IT Team": "YOUR_IT_TEAM",
+    "Human Resources": "YOUR_HR_TEAM",
+    "Change Review Board": "YOUR_CHANGE_BOARD",
+
+    "===== POSITIONS =====": "DELETE_THIS_LINE",
+    "Chief Information Security Officer": "YOUR_CISO_TITLE",
+    "Information System Security Officer": "YOUR_ISSO_TITLE",
+    "Program Manager": "YOUR_PM_TITLE",
+    "System Administrator": "YOUR_SYSADMIN_TITLE",
+
+    "===== EXAMPLE DELETION =====": "DELETE_THIS_LINE",
+    "Deprecated Team Name": "DELETE"
+  }
+}

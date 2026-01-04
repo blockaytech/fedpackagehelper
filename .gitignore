@@ -1,0 +1,79 @@
+# FedRAMP Documentation (SENSITIVE - DO NOT COMMIT)
+*.docx
+*.doc
+*.xlsx
+*.xls
+*.pdf
+
+# Output directories
+output/
+backups/
+
+# Generated analysis and report files
+*_analysis_*.txt
+*_analysis_*.json
+*_preview_*.txt
+preview_*.txt
+preview_*.json
+preview_validation_*.txt
+preview_validation_*.json
+suggested_replacements_*.json
+package_analysis_*.txt
+consistency_warnings_*.txt
+verification_*.txt
+verification_*.json
+applied_*.txt
+applied_*.json
+
+# Extracted text files
+ssp_text.txt
+*.extracted.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# User-specific configuration (contains actual replacement values)
+replacements.json
+terms_dictionary.json

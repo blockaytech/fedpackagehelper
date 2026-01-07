@@ -93,8 +93,10 @@
       "(?:the|by|to)\\s+([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*\\s+(?:Team|Office|Department))"
     ],
     "position_indicators": [
-      "((?:Chief|Senior|Lead|Principal|Director|Manager|Officer|Administrator|Engineer|Analyst)(?:\\s+[A-Z][a-zA-Z]+)+)",
-      "([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*\\s+(?:Manager|Director|Officer|Administrator|Engineer|Analyst))"
+      "((?:Chief|Senior|Lead|Principal|Head|Director|Manager|Officer|Administrator|Engineer|Analyst|VP|Vice President|Coordinator|Supervisor|Specialist)(?:\\s+[A-Za-z]+)+)",
+      "([A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*\\s+(?:Manager|Director|Officer|Administrator|Engineer|Analyst|Coordinator|Supervisor|Specialist))",
+      "((?:Chief|Senior|Lead|Principal|Head|Director|Manager|Officer|VP|Vice President)\\s+of\\s+[A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*)",
+      "((?:Head|Director|Manager|VP)\\s+[A-Z][a-zA-Z]+(?:\\s+[A-Z][a-zA-Z]+)*)"
     ]
   },
 

@@ -1107,15 +1107,31 @@ class FontStandardizer:
     """Standardizes fonts across documents."""
 
     # Fonts to preserve (symbols, checkboxes)
-    PRESERVE_FONTS = ["Segoe UI Symbol", "Wingdings", "Symbol", "Webdings"]
+    PRESERVE_FONTS = ["Segoe UI Symbol", "Wingdings", "Symbol", "Webdings", "MS Gothic"]
 
     def __init__(self, config: Config, target_font: str = "Arial",
-                 target_size: float = 11.0):
+                 target_size: float = 11.0, source_fonts: list = None):
+        """
+        Initialize font standardizer.
+
+        Args:
+            config: Configuration object
+            target_font: Target font name (default: Arial)
+            target_size: Target font size in points (default: 11.0)
+            source_fonts: List of font combo keys to replace. If None, replace all.
+                          Format: ["Calibri|None|None|None", "[inherited]|10.0|None|None"]
+        """
         self.config = config
         self.target_font = target_font
         self.target_size = target_size
+        self.source_fonts = source_fonts  # None means replace all
         self.changes = []
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def _get_font_key(self, run) -> str:
+        """Get the font combination key for a run."""
+        font = run.font
+        return f"{font.name}|{font.size.pt if font.size else None}|{font.bold}|{font.italic}"
 
     def should_standardize(self, run) -> bool:
         """Determine if this run should be standardized."""
@@ -1131,6 +1147,12 @@ class FontStandardizer:
         # Skip empty runs
         if not text:
             return False
+
+        # If source_fonts is specified, only change those fonts
+        if self.source_fonts is not None:
+            font_key = self._get_font_key(run)
+            if font_key not in self.source_fonts:
+                return False
 
         return True
 
@@ -1886,14 +1908,233 @@ def cmd_fonts(config: Config, export_format: str = None):
     print("\n" + "-" * 40)
     print("NEXT STEPS")
     print("-" * 40)
-    print("\nTo standardize fonts to Arial 11pt:")
-    print("  python package_manager.py standardize-fonts           # Preview changes")
-    print("  python package_manager.py standardize-fonts --apply   # Apply changes")
+    print("\nTo standardize fonts:")
+    print("  python package_manager.py standardize-fonts -i        # Interactive selection")
+    print("  python package_manager.py standardize-fonts           # Preview (all fonts)")
+    print("  python package_manager.py standardize-fonts --apply   # Apply (all fonts)")
+
+
+def cmd_fonts_interactive(config: Config):
+    """Interactive font selection and replacement."""
+    print("\n" + "=" * 60)
+    print("INTERACTIVE FONT STANDARDIZATION")
+    print("=" * 60)
+
+    drafts = config.get_drafts()
+    if not drafts:
+        print("\nNo draft documents found in 'drafts/' directory.")
+        print("Run 'python package_manager.py apply' first to create drafts.")
+        return
+
+    # Step 1: Analyze fonts
+    print("\n" + "-" * 40)
+    print("STEP 1: ANALYZING FONTS")
+    print("-" * 40)
+
+    analyzer = FontAnalyzer(config)
+    results = analyzer.analyze_all()
+
+    if not results.get("all_combinations"):
+        print("\nNo fonts found in documents.")
+        return
+
+    # Step 2: Display font list with numbers
+    print("\n" + "-" * 40)
+    print("STEP 2: SELECT FONTS TO REPLACE")
+    print("-" * 40)
+
+    sorted_combos = sorted(
+        results["all_combinations"].items(),
+        key=lambda x: -x[1]["count"]
+    )
+
+    total_runs = results.get("total_runs", 1)
+    font_list = []
+
+    print("\nFont combinations found:\n")
+    for i, (combo_key, data) in enumerate(sorted_combos, 1):
+        # Skip symbol fonts
+        if data.get("font_name") in FontStandardizer.PRESERVE_FONTS:
+            continue
+
+        desc = format_font_combo(
+            data["font_name"], data["font_size_pt"],
+            data["bold"], data["italic"]
+        )
+        pct = (data["count"] / total_runs) * 100 if total_runs > 0 else 0
+        sample = data["samples"][0][:40] if data["samples"] else ""
+
+        font_list.append({
+            "index": len(font_list) + 1,
+            "key": combo_key,
+            "desc": desc,
+            "count": data["count"],
+            "pct": pct,
+            "sample": sample,
+            "data": data
+        })
+
+        print(f"  [{len(font_list):2d}] [{data['count']:5d}x] ({pct:5.1f}%) {desc}")
+        if sample:
+            print(f"       Sample: \"{sample}...\"")
+        print()
+
+    if not font_list:
+        print("\nNo replaceable fonts found (only symbol fonts present).")
+        return
+
+    # Step 3: Get user selection
+    print("-" * 40)
+    print("\nEnter the numbers of fonts to replace (comma-separated)")
+    print("  Example: 1,3,5  or  all  or  q to quit")
+    print()
+
+    try:
+        selection = input("Selection: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        return
+
+    if selection == 'q' or selection == 'quit':
+        print("\nCancelled.")
+        return
+
+    if selection == 'all':
+        selected_fonts = [f["key"] for f in font_list]
+        selected_indices = list(range(1, len(font_list) + 1))
+    else:
+        try:
+            selected_indices = [int(x.strip()) for x in selection.split(",")]
+            selected_fonts = []
+            for idx in selected_indices:
+                if 1 <= idx <= len(font_list):
+                    selected_fonts.append(font_list[idx - 1]["key"])
+                else:
+                    print(f"\nInvalid selection: {idx}. Please enter numbers 1-{len(font_list)}.")
+                    return
+        except ValueError:
+            print("\nInvalid input. Please enter numbers separated by commas.")
+            return
+
+    if not selected_fonts:
+        print("\nNo fonts selected.")
+        return
+
+    print(f"\nSelected {len(selected_fonts)} font combination(s) to replace.")
+
+    # Step 4: Get target font
+    print("\n" + "-" * 40)
+    print("STEP 3: CHOOSE TARGET FONT")
+    print("-" * 40)
+
+    print("\nCommon options:")
+    print("  1) Arial 11pt (FedRAMP standard)")
+    print("  2) Calibri 11pt")
+    print("  3) Times New Roman 12pt")
+    print("  4) Custom")
+    print()
+
+    try:
+        target_choice = input("Choice [1]: ").strip() or "1"
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        return
+
+    if target_choice == "1":
+        target_font, target_size = "Arial", 11.0
+    elif target_choice == "2":
+        target_font, target_size = "Calibri", 11.0
+    elif target_choice == "3":
+        target_font, target_size = "Times New Roman", 12.0
+    elif target_choice == "4":
+        try:
+            target_font = input("Font name: ").strip() or "Arial"
+            size_input = input("Font size (pt): ").strip() or "11"
+            target_size = float(size_input)
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return
+        except ValueError:
+            print("\nInvalid size. Using 11pt.")
+            target_size = 11.0
+    else:
+        target_font, target_size = "Arial", 11.0
+
+    print(f"\nTarget: {target_font} {target_size}pt")
+
+    # Step 5: Preview changes
+    print("\n" + "-" * 40)
+    print("STEP 4: PREVIEW CHANGES")
+    print("-" * 40)
+
+    standardizer = FontStandardizer(config, target_font, target_size, source_fonts=selected_fonts)
+    preview_results = standardizer.standardize_drafts(preview_only=True)
+
+    print(f"\nTotal changes to make: {preview_results['total_changes']}")
+
+    if preview_results['total_changes'] == 0:
+        print("\nNo changes needed - selected fonts not found in documents.")
+        return
+
+    # Show summary of what would change
+    print("\nChanges by source font:")
+    for font in font_list:
+        if font["key"] in selected_fonts:
+            print(f"  {font['desc']} -> {target_font} {target_size}pt ({font['count']} instances)")
+
+    # Step 6: Confirm and apply
+    print("\n" + "-" * 40)
+    print("STEP 5: APPLY CHANGES")
+    print("-" * 40)
+
+    try:
+        confirm = input("\nApply these changes? (yes/no) [no]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        return
+
+    if confirm not in ['yes', 'y']:
+        print("\nChanges not applied. Run again when ready.")
+        return
+
+    # Create backup
+    print("\nCreating backup...")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_subdir = config.backup_dir / f"pre_font_standardize_{timestamp}"
+    backup_subdir.mkdir(parents=True, exist_ok=True)
+
+    for draft_path in drafts:
+        backup_path = backup_subdir / draft_path.name
+        shutil.copy2(draft_path, backup_path)
+    print(f"Backups saved to: {backup_subdir}")
+
+    # Apply changes
+    print("\nApplying changes...")
+    apply_results = standardizer.standardize_drafts(preview_only=False)
+
+    # Save report
+    config.ensure_dirs()
+    json_path = config.output_dir / f"font_standardize_applied_{timestamp}.json"
+    with open(json_path, 'w') as f:
+        json.dump(apply_results, f, indent=2, default=str)
+
+    print(f"\n" + "=" * 60)
+    print("COMPLETE")
+    print("=" * 60)
+    print(f"\nChanges applied: {apply_results['total_changes']}")
+    print(f"Results saved: {json_path}")
+    print(f"\nNext step: Run 'python package_manager.py verify' to validate the drafts.")
 
 
 def cmd_standardize_fonts(config: Config, apply: bool = False,
-                          target_font: str = "Arial", target_size: float = 11.0):
+                          target_font: str = "Arial", target_size: float = 11.0,
+                          interactive: bool = False):
     """Standardize fonts in draft documents."""
+    # If interactive mode, delegate to interactive function
+    if interactive:
+        cmd_fonts_interactive(config)
+        return
+
     mode_str = "APPLYING" if apply else "PREVIEWING"
     print("\n" + "=" * 60)
     print(f"{mode_str} FONT STANDARDIZATION")
@@ -2036,6 +2277,11 @@ def main():
         default=11.0,
         help="Target font size in points for standardization (default: 11.0)"
     )
+    parser.add_argument(
+        "-i", "--interactive",
+        action="store_true",
+        help="Interactive mode for font selection (for standardize-fonts command)"
+    )
 
     args = parser.parse_args()
 
@@ -2056,7 +2302,7 @@ def main():
     elif args.command == "fonts":
         cmd_fonts(config, args.format)
     elif args.command == "standardize-fonts":
-        cmd_standardize_fonts(config, args.apply, args.target_font, args.target_size)
+        cmd_standardize_fonts(config, args.apply, args.target_font, args.target_size, args.interactive)
 
 
 if __name__ == "__main__":

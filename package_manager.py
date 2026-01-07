@@ -594,6 +594,63 @@ class BatchProcessor:
 
         return report
 
+    def generate_detailed_report(self, output_path: Path = None) -> str:
+        """Generate a detailed text report showing each change with context."""
+        lines = []
+        lines.append("=" * 80)
+        lines.append(f"FEDRAMP PACKAGE DETAILED {'PREVIEW' if self.results.get('mode') == 'preview' else 'CHANGES'} REPORT")
+        lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append("=" * 80)
+
+        lines.append(f"\nTotal documents processed: {len(self.results.get('documents', {}))}")
+        lines.append(f"Total changes: {self.results.get('total_changes', 0)}")
+
+        # Group changes by replacement type for easier review
+        for doc_name, doc_data in self.results.get("documents", {}).items():
+            lines.append("\n" + "=" * 80)
+            lines.append(f"DOCUMENT: {doc_name}")
+            lines.append(f"Total changes: {doc_data['change_count']}")
+            lines.append("=" * 80)
+
+            # Group changes by old_text -> new_text
+            changes_by_type = defaultdict(list)
+            for change in doc_data.get("changes", []):
+                key = f"{change['old_text']} -> {change['new_text']}"
+                changes_by_type[key].append(change)
+
+            # Sort by count (most frequent first)
+            sorted_types = sorted(changes_by_type.items(), key=lambda x: -len(x[1]))
+
+            for change_type, changes in sorted_types:
+                lines.append("\n" + "-" * 60)
+                lines.append(f"[{len(changes)}x] {change_type}")
+                lines.append("-" * 60)
+
+                # Show up to 5 examples with context
+                for i, change in enumerate(changes[:5]):
+                    lines.append(f"\n  Location: {change['location']}")
+                    context = change.get('context_before', '')
+                    if context:
+                        # Highlight the term in context
+                        lines.append(f"  Context:  \"{context}\"")
+                    if change.get('is_deletion'):
+                        lines.append(f"  Action:   DELETE")
+
+                if len(changes) > 5:
+                    lines.append(f"\n  ... and {len(changes) - 5} more instances")
+
+        lines.append("\n" + "=" * 80)
+        lines.append("END OF DETAILED REPORT")
+        lines.append("=" * 80)
+
+        report = "\n".join(lines)
+
+        if output_path:
+            with open(output_path, 'w') as f:
+                f.write(report)
+
+        return report
+
     def export_to_excel(self, output_path: Path) -> bool:
         """Export results to Excel spreadsheet."""
         if not PANDAS_AVAILABLE or not EXCEL_AVAILABLE:
@@ -927,11 +984,18 @@ def cmd_preview(config: Config, export_format: str = None):
     if not results:
         return
 
-    # Generate report
+    # Generate reports
     config.ensure_dirs()
+
+    # Summary report
     report_path = config.output_dir / f"preview_{processor.timestamp}.txt"
     processor.generate_report(report_path)
-    print(f"\nText report: {report_path}")
+    print(f"\nSummary report: {report_path}")
+
+    # Detailed report with context
+    detailed_path = config.output_dir / f"preview_{processor.timestamp}_detailed.txt"
+    processor.generate_detailed_report(detailed_path)
+    print(f"Detailed report (with context): {detailed_path}")
 
     # JSON
     json_path = config.output_dir / f"preview_{processor.timestamp}.json"

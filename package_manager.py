@@ -874,6 +874,363 @@ class PackageAnalyzer:
 
 
 # =============================================================================
+# FONT ANALYSIS AND STANDARDIZATION
+# =============================================================================
+
+def format_font_combo(font_name, size, bold, italic) -> str:
+    """Format a font combination for display."""
+    parts = []
+    parts.append(font_name if font_name else "[inherited]")
+    parts.append(f"{size}pt" if size else "[inherited]")
+    if bold is True:
+        parts.append("Bold")
+    if italic is True:
+        parts.append("Italic")
+    return ", ".join(parts)
+
+
+class FontAnalyzer:
+    """Analyzes font usage across documents."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.results = {}
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def analyze_document(self, doc_path: Path) -> dict:
+        """Analyze all fonts in a single document."""
+        doc = Document(str(doc_path))
+
+        # Track font combinations: (name, size, bold, italic) -> {count, samples, locations}
+        font_combinations = defaultdict(lambda: {
+            "count": 0,
+            "samples": [],
+            "locations": []
+        })
+
+        def process_paragraph(para, location: str):
+            for run in para.runs:
+                if run.text.strip():
+                    font = run.font
+                    key = (
+                        font.name,
+                        font.size.pt if font.size else None,
+                        font.bold,
+                        font.italic
+                    )
+                    combo = font_combinations[key]
+                    combo["count"] += 1
+                    if len(combo["samples"]) < 3:
+                        combo["samples"].append(run.text.strip()[:60])
+                    if len(combo["locations"]) < 5:
+                        combo["locations"].append(location)
+
+        # Process all document sections
+        for i, para in enumerate(doc.paragraphs):
+            process_paragraph(para, f"Body, Paragraph {i+1}")
+
+        for ti, table in enumerate(doc.tables):
+            for ri, row in enumerate(table.rows):
+                for ci, cell in enumerate(row.cells):
+                    for para in cell.paragraphs:
+                        process_paragraph(para, f"Table {ti+1}, Row {ri+1}, Col {ci+1}")
+
+        for si, section in enumerate(doc.sections):
+            for header in [section.header, section.first_page_header, section.even_page_header]:
+                if header:
+                    for para in header.paragraphs:
+                        process_paragraph(para, f"Header (Section {si+1})")
+            for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+                if footer:
+                    for para in footer.paragraphs:
+                        process_paragraph(para, f"Footer (Section {si+1})")
+
+        # Convert defaultdict keys to serializable format
+        result_combos = {}
+        for key, data in font_combinations.items():
+            str_key = f"{key[0]}|{key[1]}|{key[2]}|{key[3]}"
+            result_combos[str_key] = {
+                "font_name": key[0],
+                "font_size_pt": key[1],
+                "bold": key[2],
+                "italic": key[3],
+                **data
+            }
+
+        return {
+            "document": doc_path.name,
+            "font_combinations": result_combos,
+            "total_runs": sum(c["count"] for c in result_combos.values())
+        }
+
+    def analyze_all(self) -> dict:
+        """Analyze all documents in the package."""
+        documents = self.config.get_drafts() or self.config.get_documents()
+
+        if not documents:
+            return {"error": "No documents found"}
+
+        all_combinations = defaultdict(lambda: {
+            "count": 0,
+            "samples": [],
+            "locations": [],
+            "documents": []
+        })
+
+        doc_results = {}
+
+        for doc_path in documents:
+            print(f"  Analyzing: {doc_path.name}...")
+            result = self.analyze_document(doc_path)
+            doc_results[doc_path.name] = result
+
+            # Aggregate combinations across documents
+            for combo_key, combo_data in result["font_combinations"].items():
+                agg = all_combinations[combo_key]
+                agg["count"] += combo_data["count"]
+                agg["font_name"] = combo_data["font_name"]
+                agg["font_size_pt"] = combo_data["font_size_pt"]
+                agg["bold"] = combo_data["bold"]
+                agg["italic"] = combo_data["italic"]
+                if len(agg["samples"]) < 3:
+                    agg["samples"].extend(combo_data["samples"][:3 - len(agg["samples"])])
+                if doc_path.name not in agg["documents"]:
+                    agg["documents"].append(doc_path.name)
+
+        self.results = {
+            "timestamp": datetime.now().isoformat(),
+            "documents_analyzed": len(documents),
+            "documents": doc_results,
+            "all_combinations": dict(all_combinations),
+            "total_runs": sum(d["total_runs"] for d in doc_results.values())
+        }
+
+        return self.results
+
+    def generate_report(self, output_path: Path = None) -> str:
+        """Generate a text report of font analysis."""
+        lines = []
+        lines.append("=" * 80)
+        lines.append("FONT USAGE REPORT")
+        lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append("=" * 80)
+
+        lines.append(f"\nDocuments analyzed: {self.results.get('documents_analyzed', 0)}")
+        lines.append(f"Total text runs: {self.results.get('total_runs', 0)}")
+        lines.append(f"Unique font combinations: {len(self.results.get('all_combinations', {}))}")
+
+        lines.append("\n" + "-" * 40)
+        lines.append("FONT COMBINATIONS BY FREQUENCY")
+        lines.append("-" * 40)
+
+        sorted_combos = sorted(
+            self.results.get("all_combinations", {}).items(),
+            key=lambda x: -x[1]["count"]
+        )
+
+        total_runs = self.results.get("total_runs", 1)
+        for combo_key, data in sorted_combos:
+            desc = format_font_combo(
+                data["font_name"], data["font_size_pt"],
+                data["bold"], data["italic"]
+            )
+            pct = (data["count"] / total_runs) * 100 if total_runs > 0 else 0
+
+            lines.append(f"\n[{data['count']:6d}x] ({pct:5.1f}%) {desc}")
+            if data["samples"]:
+                sample = data["samples"][0][:50]
+                lines.append(f"           Sample: \"{sample}...\"")
+            if data["documents"]:
+                docs = ", ".join(data["documents"][:3])
+                lines.append(f"           Documents: {docs}")
+
+        # Per-document breakdown
+        lines.append("\n" + "-" * 40)
+        lines.append("PER-DOCUMENT SUMMARY")
+        lines.append("-" * 40)
+
+        for doc_name, doc_data in self.results.get("documents", {}).items():
+            lines.append(f"\n{doc_name}:")
+            lines.append(f"  Total runs: {doc_data['total_runs']}")
+            lines.append(f"  Font combinations: {len(doc_data['font_combinations'])}")
+
+        lines.append("\n" + "=" * 80)
+        lines.append("END OF REPORT")
+        lines.append("=" * 80)
+
+        report = "\n".join(lines)
+
+        if output_path:
+            with open(output_path, 'w') as f:
+                f.write(report)
+
+        return report
+
+    def export_to_excel(self, output_path: Path) -> bool:
+        """Export font analysis to Excel."""
+        if not PANDAS_AVAILABLE or not EXCEL_AVAILABLE:
+            return False
+
+        # Summary sheet
+        summary_data = []
+        for combo_key, data in self.results.get("all_combinations", {}).items():
+            summary_data.append({
+                "Font Name": data["font_name"] or "[inherited]",
+                "Size (pt)": data["font_size_pt"] or "[inherited]",
+                "Bold": str(data["bold"]) if data["bold"] is not None else "[inherited]",
+                "Italic": str(data["italic"]) if data["italic"] is not None else "[inherited]",
+                "Count": data["count"],
+                "Percentage": f"{(data['count'] / self.results.get('total_runs', 1)) * 100:.1f}%",
+                "Sample Text": data["samples"][0][:60] if data["samples"] else ""
+            })
+        summary_df = pd.DataFrame(summary_data)
+        summary_df = summary_df.sort_values("Count", ascending=False)
+
+        # Per-document sheet
+        doc_data = []
+        for doc_name, doc_info in self.results.get("documents", {}).items():
+            doc_data.append({
+                "Document": doc_name,
+                "Total Runs": doc_info["total_runs"],
+                "Unique Font Combinations": len(doc_info["font_combinations"])
+            })
+        doc_df = pd.DataFrame(doc_data)
+
+        with pd.ExcelWriter(str(output_path), engine='openpyxl') as writer:
+            summary_df.to_excel(writer, sheet_name='Font Summary', index=False)
+            doc_df.to_excel(writer, sheet_name='Per Document', index=False)
+
+        return True
+
+
+class FontStandardizer:
+    """Standardizes fonts across documents."""
+
+    # Fonts to preserve (symbols, checkboxes)
+    PRESERVE_FONTS = ["Segoe UI Symbol", "Wingdings", "Symbol", "Webdings"]
+
+    def __init__(self, config: Config, target_font: str = "Arial",
+                 target_size: float = 11.0):
+        self.config = config
+        self.target_font = target_font
+        self.target_size = target_size
+        self.changes = []
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def should_standardize(self, run) -> bool:
+        """Determine if this run should be standardized."""
+        # Don't change symbol fonts
+        if run.font.name in self.PRESERVE_FONTS:
+            return False
+
+        # Check for special characters only (checkboxes, etc.)
+        text = run.text.strip()
+        if text and all(ord(c) > 8000 for c in text):
+            return False
+
+        # Skip empty runs
+        if not text:
+            return False
+
+        return True
+
+    def standardize_run(self, run, location: str, preview_only: bool = True) -> dict:
+        """Standardize a single run's font."""
+        if not self.should_standardize(run):
+            return None
+
+        from docx.shared import Pt
+
+        font = run.font
+        current_name = font.name
+        current_size = font.size.pt if font.size else None
+
+        # Check if change is needed (only explicit fonts, or if we want to set all)
+        # For now, we'll set explicit fonts on everything that's not a symbol
+        change = {
+            "location": location,
+            "text_sample": run.text[:40],
+            "before": {
+                "font_name": current_name,
+                "font_size_pt": current_size
+            },
+            "after": {
+                "font_name": self.target_font,
+                "font_size_pt": self.target_size
+            }
+        }
+
+        if not preview_only:
+            font.name = self.target_font
+            font.size = Pt(self.target_size)
+
+        return change
+
+    def standardize_document(self, doc_path: Path, preview_only: bool = True) -> dict:
+        """Standardize all fonts in a document."""
+        doc = Document(str(doc_path))
+        changes = []
+
+        def process_paragraph(para, location: str):
+            for run in para.runs:
+                change = self.standardize_run(run, location, preview_only)
+                if change:
+                    changes.append(change)
+
+        # Process all sections
+        for i, para in enumerate(doc.paragraphs):
+            process_paragraph(para, f"Body, Paragraph {i+1}")
+
+        for ti, table in enumerate(doc.tables):
+            for ri, row in enumerate(table.rows):
+                for ci, cell in enumerate(row.cells):
+                    for para in cell.paragraphs:
+                        process_paragraph(para, f"Table {ti+1}, Row {ri+1}, Col {ci+1}")
+
+        for si, section in enumerate(doc.sections):
+            for header in [section.header, section.first_page_header, section.even_page_header]:
+                if header:
+                    for para in header.paragraphs:
+                        process_paragraph(para, f"Header (Section {si+1})")
+            for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+                if footer:
+                    for para in footer.paragraphs:
+                        process_paragraph(para, f"Footer (Section {si+1})")
+
+        # Save if not preview
+        if not preview_only and changes:
+            doc.save(str(doc_path))
+
+        return {
+            "document": doc_path.name,
+            "changes": changes,
+            "change_count": len(changes)
+        }
+
+    def standardize_drafts(self, preview_only: bool = True) -> dict:
+        """Standardize fonts in all draft documents."""
+        drafts = self.config.get_drafts()
+
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "mode": "preview" if preview_only else "apply",
+            "target_font": self.target_font,
+            "target_size_pt": self.target_size,
+            "documents": {},
+            "total_changes": 0
+        }
+
+        for draft_path in drafts:
+            print(f"  Processing: {draft_path.name}...")
+            doc_result = self.standardize_document(draft_path, preview_only)
+            results["documents"][draft_path.name] = doc_result
+            results["total_changes"] += doc_result["change_count"]
+            print(f"    Changes: {doc_result['change_count']}")
+
+        return results
+
+
+# =============================================================================
 # CLI COMMANDS
 # =============================================================================
 
@@ -1486,13 +1843,170 @@ def cmd_verify(config: Config, export_format: str = None):
             print(f"Excel report: {excel_path}")
 
 
+def cmd_fonts(config: Config, export_format: str = None):
+    """Analyze font usage across all draft documents."""
+    print("\n" + "=" * 60)
+    print("ANALYZING FONT USAGE")
+    print("=" * 60)
+
+    drafts = config.get_drafts()
+    if not drafts:
+        print("\nNo draft documents found in 'drafts/' directory.")
+        print("Run 'python package_manager.py apply' first to create drafts.")
+        return
+
+    analyzer = FontAnalyzer(config)
+    results = analyzer.analyze_all()
+
+    if not results["documents"]:
+        print("\nNo documents analyzed.")
+        return
+
+    # Generate reports
+    config.ensure_dirs()
+    timestamp = analyzer.timestamp
+
+    # Text report
+    report_path = config.output_dir / f"fonts_{timestamp}.txt"
+    analyzer.generate_report(report_path)
+    print(f"\nText report: {report_path}")
+
+    # JSON
+    json_path = config.output_dir / f"fonts_{timestamp}.json"
+    with open(json_path, 'w') as f:
+        json.dump(results, f, indent=2, default=str)
+    print(f"JSON results: {json_path}")
+
+    # Excel
+    if export_format == "excel":
+        excel_path = config.output_dir / f"fonts_{timestamp}.xlsx"
+        if analyzer.export_to_excel(excel_path):
+            print(f"Excel export: {excel_path}")
+
+    print("\n" + "-" * 40)
+    print("NEXT STEPS")
+    print("-" * 40)
+    print("\nTo standardize fonts to Arial 11pt:")
+    print("  python package_manager.py standardize-fonts           # Preview changes")
+    print("  python package_manager.py standardize-fonts --apply   # Apply changes")
+
+
+def cmd_standardize_fonts(config: Config, apply: bool = False,
+                          target_font: str = "Arial", target_size: float = 11.0):
+    """Standardize fonts in draft documents."""
+    mode_str = "APPLYING" if apply else "PREVIEWING"
+    print("\n" + "=" * 60)
+    print(f"{mode_str} FONT STANDARDIZATION")
+    print("=" * 60)
+
+    drafts = config.get_drafts()
+    if not drafts:
+        print("\nNo draft documents found in 'drafts/' directory.")
+        print("Run 'python package_manager.py apply' first to create drafts.")
+        return
+
+    print(f"\nTarget font: {target_font} {target_size}pt")
+    print(f"Mode: {'APPLY (will modify files)' if apply else 'PREVIEW (no changes)'}")
+    print(f"Documents: {len(drafts)}")
+
+    if apply:
+        # Create backup before applying changes
+        print("\n" + "-" * 40)
+        print("CREATING BACKUP")
+        print("-" * 40)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_subdir = config.backup_dir / f"pre_font_standardize_{timestamp}"
+        backup_subdir.mkdir(parents=True, exist_ok=True)
+
+        for draft_path in drafts:
+            backup_path = backup_subdir / draft_path.name
+            shutil.copy2(draft_path, backup_path)
+            print(f"  Backed up: {draft_path.name}")
+
+        print(f"\nBackups saved to: {backup_subdir}")
+
+    print("\n" + "-" * 40)
+    print("PROCESSING DOCUMENTS")
+    print("-" * 40)
+
+    standardizer = FontStandardizer(config, target_font, target_size)
+    results = standardizer.standardize_drafts(preview_only=not apply)
+
+    # Generate reports
+    config.ensure_dirs()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    mode_suffix = "applied" if apply else "preview"
+
+    # JSON
+    json_path = config.output_dir / f"font_standardize_{mode_suffix}_{timestamp}.json"
+    with open(json_path, 'w') as f:
+        json.dump(results, f, indent=2, default=str)
+    print(f"\nJSON results: {json_path}")
+
+    # Text report
+    report_lines = []
+    report_lines.append("=" * 80)
+    report_lines.append(f"FONT STANDARDIZATION REPORT - {results['mode'].upper()}")
+    report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report_lines.append("=" * 80)
+    report_lines.append(f"\nTarget font: {target_font} {target_size}pt")
+    report_lines.append(f"Documents processed: {len(results['documents'])}")
+    report_lines.append(f"Total changes: {results['total_changes']}")
+
+    for doc_name, doc_data in results["documents"].items():
+        report_lines.append(f"\n" + "-" * 40)
+        report_lines.append(f"Document: {doc_name}")
+        report_lines.append(f"Changes: {doc_data['change_count']}")
+
+        if doc_data.get("changes"):
+            # Group changes by old font
+            changes_by_font = defaultdict(list)
+            for change in doc_data["changes"]:
+                before = change.get("before", {})
+                font_name = before.get("font_name", "[inherited]") or "[inherited]"
+                font_size = before.get("font_size_pt")
+                size_str = f"{font_size}pt" if font_size else "[inherited]"
+                key = f"{font_name}, {size_str}"
+                changes_by_font[key].append(change)
+
+            for old_font, changes in sorted(changes_by_font.items(), key=lambda x: -len(x[1])):
+                report_lines.append(f"\n  {old_font} -> {target_font} {target_size}pt: {len(changes)} instances")
+                # Show a few samples
+                for change in changes[:3]:
+                    sample = change.get("text_sample", "")[:50]
+                    if sample:
+                        report_lines.append(f"    Sample: \"{sample}...\"")
+
+    report_lines.append("\n" + "=" * 80)
+    report_lines.append("END OF REPORT")
+    report_lines.append("=" * 80)
+
+    report_path = config.output_dir / f"font_standardize_{mode_suffix}_{timestamp}.txt"
+    with open(report_path, 'w') as f:
+        f.write("\n".join(report_lines))
+    print(f"Text report: {report_path}")
+
+    # Summary
+    print("\n" + "-" * 40)
+    print("SUMMARY")
+    print("-" * 40)
+    print(f"\nTotal changes: {results['total_changes']}")
+
+    if not apply and results['total_changes'] > 0:
+        print("\nTo apply these changes, run:")
+        print(f"  python package_manager.py standardize-fonts --apply")
+    elif apply:
+        print("\nFont standardization complete!")
+        print("\nNext step: Run 'python package_manager.py verify' to validate the drafts.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="FedRAMP Package Manager - Manage documentation updates"
     )
     parser.add_argument(
         "command",
-        choices=["status", "analyze", "preview", "apply", "verify", "export"],
+        choices=["status", "analyze", "preview", "apply", "verify", "export", "fonts", "standardize-fonts"],
         help="Command to run"
     )
     parser.add_argument(
@@ -1505,6 +2019,22 @@ def main():
         choices=["excel", "csv"],
         default="excel",
         help="Export format (default: excel)"
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply changes (for standardize-fonts command)"
+    )
+    parser.add_argument(
+        "--target-font",
+        default="Arial",
+        help="Target font name for standardization (default: Arial)"
+    )
+    parser.add_argument(
+        "--target-size",
+        type=float,
+        default=11.0,
+        help="Target font size in points for standardization (default: 11.0)"
     )
 
     args = parser.parse_args()
@@ -1523,6 +2053,10 @@ def main():
         cmd_verify(config, args.format)
     elif args.command == "export":
         cmd_export(config, args.format)
+    elif args.command == "fonts":
+        cmd_fonts(config, args.format)
+    elif args.command == "standardize-fonts":
+        cmd_standardize_fonts(config, args.apply, args.target_font, args.target_size)
 
 
 if __name__ == "__main__":

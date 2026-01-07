@@ -901,14 +901,15 @@ class FontAnalyzer:
         """Analyze all fonts in a single document."""
         doc = Document(str(doc_path))
 
-        # Track font combinations: (name, size, bold, italic) -> {count, samples, locations}
+        # Track font combinations: (name, size, bold, italic) -> {count, samples, locations, location_counts}
         font_combinations = defaultdict(lambda: {
             "count": 0,
             "samples": [],
-            "locations": []
+            "locations": [],
+            "location_counts": {"body": 0, "table": 0, "header": 0, "footer": 0}
         })
 
-        def process_paragraph(para, location: str):
+        def process_paragraph(para, location: str, location_type: str):
             for run in para.runs:
                 if run.text.strip():
                     font = run.font
@@ -920,30 +921,34 @@ class FontAnalyzer:
                     )
                     combo = font_combinations[key]
                     combo["count"] += 1
-                    if len(combo["samples"]) < 3:
-                        combo["samples"].append(run.text.strip()[:60])
-                    if len(combo["locations"]) < 5:
+                    combo["location_counts"][location_type] += 1
+                    # Store more samples (5) with longer text (100 chars)
+                    if len(combo["samples"]) < 5:
+                        sample_text = run.text.strip()[:100]
+                        if sample_text and sample_text not in combo["samples"]:
+                            combo["samples"].append(sample_text)
+                    if len(combo["locations"]) < 10:
                         combo["locations"].append(location)
 
         # Process all document sections
         for i, para in enumerate(doc.paragraphs):
-            process_paragraph(para, f"Body, Paragraph {i+1}")
+            process_paragraph(para, f"Body, Paragraph {i+1}", "body")
 
         for ti, table in enumerate(doc.tables):
             for ri, row in enumerate(table.rows):
                 for ci, cell in enumerate(row.cells):
                     for para in cell.paragraphs:
-                        process_paragraph(para, f"Table {ti+1}, Row {ri+1}, Col {ci+1}")
+                        process_paragraph(para, f"Table {ti+1}, Row {ri+1}, Col {ci+1}", "table")
 
         for si, section in enumerate(doc.sections):
             for header in [section.header, section.first_page_header, section.even_page_header]:
                 if header:
                     for para in header.paragraphs:
-                        process_paragraph(para, f"Header (Section {si+1})")
+                        process_paragraph(para, f"Header (Section {si+1})", "header")
             for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
                 if footer:
                     for para in footer.paragraphs:
-                        process_paragraph(para, f"Footer (Section {si+1})")
+                        process_paragraph(para, f"Footer (Section {si+1})", "footer")
 
         # Convert defaultdict keys to serializable format
         result_combos = {}
@@ -974,7 +979,8 @@ class FontAnalyzer:
             "count": 0,
             "samples": [],
             "locations": [],
-            "documents": []
+            "documents": [],
+            "location_counts": {"body": 0, "table": 0, "header": 0, "footer": 0}
         })
 
         doc_results = {}
@@ -992,8 +998,14 @@ class FontAnalyzer:
                 agg["font_size_pt"] = combo_data["font_size_pt"]
                 agg["bold"] = combo_data["bold"]
                 agg["italic"] = combo_data["italic"]
-                if len(agg["samples"]) < 3:
-                    agg["samples"].extend(combo_data["samples"][:3 - len(agg["samples"])])
+                # Merge location counts
+                for loc_type in ["body", "table", "header", "footer"]:
+                    agg["location_counts"][loc_type] += combo_data.get("location_counts", {}).get(loc_type, 0)
+                # Store more samples (5) with longer text
+                if len(agg["samples"]) < 5:
+                    for sample in combo_data["samples"]:
+                        if sample not in agg["samples"] and len(agg["samples"]) < 5:
+                            agg["samples"].append(sample)
                 if doc_path.name not in agg["documents"]:
                     agg["documents"].append(doc_path.name)
 
@@ -1952,6 +1964,8 @@ def cmd_fonts_interactive(config: Config):
     font_list = []
 
     print("\nFont combinations found:\n")
+    print("=" * 80)
+
     for i, (combo_key, data) in enumerate(sorted_combos, 1):
         # Skip symbol fonts
         if data.get("font_name") in FontStandardizer.PRESERVE_FONTS:
@@ -1962,7 +1976,6 @@ def cmd_fonts_interactive(config: Config):
             data["bold"], data["italic"]
         )
         pct = (data["count"] / total_runs) * 100 if total_runs > 0 else 0
-        sample = data["samples"][0][:40] if data["samples"] else ""
 
         font_list.append({
             "index": len(font_list) + 1,
@@ -1970,14 +1983,41 @@ def cmd_fonts_interactive(config: Config):
             "desc": desc,
             "count": data["count"],
             "pct": pct,
-            "sample": sample,
             "data": data
         })
 
-        print(f"  [{len(font_list):2d}] [{data['count']:5d}x] ({pct:5.1f}%) {desc}")
-        if sample:
-            print(f"       Sample: \"{sample}...\"")
-        print()
+        # Display font header with count and percentage
+        print(f"\n  [{len(font_list):2d}] {desc}")
+        print(f"      Count: {data['count']:,} instances ({pct:.1f}%)")
+
+        # Display location breakdown
+        loc_counts = data.get("location_counts", {})
+        locations = []
+        if loc_counts.get("body", 0) > 0:
+            locations.append(f"Body: {loc_counts['body']:,}")
+        if loc_counts.get("table", 0) > 0:
+            locations.append(f"Tables: {loc_counts['table']:,}")
+        if loc_counts.get("header", 0) > 0:
+            locations.append(f"Headers: {loc_counts['header']:,}")
+        if loc_counts.get("footer", 0) > 0:
+            locations.append(f"Footers: {loc_counts['footer']:,}")
+        if locations:
+            print(f"      Location: {' | '.join(locations)}")
+
+        # Display multiple samples (up to 3 for display, with longer text)
+        samples = data.get("samples", [])
+        if samples:
+            print(f"      Samples:")
+            for j, sample in enumerate(samples[:3], 1):
+                # Show up to 80 chars of each sample
+                display_sample = sample[:80]
+                if len(sample) > 80:
+                    display_sample += "..."
+                print(f"        {j}. \"{display_sample}\"")
+
+        print("      " + "-" * 70)
+
+    print()
 
     if not font_list:
         print("\nNo replaceable fonts found (only symbol fonts present).")

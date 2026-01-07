@@ -29,6 +29,10 @@ applied_*.json
 ssp_text.txt
 *.extracted.txt
 
+# Change logs
+change_log_*.json
+change_log_*.txt
+
 # Python
 __pycache__/
 *.py[cod]

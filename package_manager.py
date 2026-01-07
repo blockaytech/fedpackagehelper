@@ -218,6 +218,123 @@ class ReplacementsConfig:
 
 
 # =============================================================================
+# TEXT QUALITY CHECKS
+# =============================================================================
+
+def find_repeated_words(text: str, min_word_length: int = 2) -> list:
+    """
+    Find adjacent repeated words in text (e.g., 'Knox Knox').
+
+    Returns list of dicts with:
+        - word: the repeated word
+        - count: how many times it repeats consecutively
+        - context: surrounding text for reference
+        - position: character position in text
+    """
+    if not text:
+        return []
+
+    # Pattern to find repeated words (case-insensitive)
+    # Matches: word followed by whitespace and the same word
+    pattern = re.compile(
+        r'\b(\w{' + str(min_word_length) + r',})\s+\1\b',
+        re.IGNORECASE
+    )
+
+    results = []
+    for match in pattern.finditer(text):
+        word = match.group(1)
+        position = match.start()
+
+        # Get context (50 chars before and after)
+        context_start = max(0, position - 30)
+        context_end = min(len(text), match.end() + 30)
+        context = text[context_start:context_end]
+
+        # Check for more than 2 repetitions (e.g., "Knox Knox Knox")
+        full_match = match.group(0)
+        extended_pattern = re.compile(
+            rf'\b({re.escape(word)}(?:\s+{re.escape(word)})+)\b',
+            re.IGNORECASE
+        )
+        extended_match = extended_pattern.search(text[position:position + 200])
+        if extended_match:
+            full_match = extended_match.group(1)
+            repetition_count = len(re.findall(rf'\b{re.escape(word)}\b', full_match, re.IGNORECASE))
+        else:
+            repetition_count = 2
+
+        results.append({
+            "word": word,
+            "count": repetition_count,
+            "context": context.strip(),
+            "position": position,
+            "full_match": full_match
+        })
+
+    return results
+
+
+def check_document_for_repeated_words(doc_path: Path, min_word_length: int = 2) -> dict:
+    """
+    Check a document for repeated adjacent words.
+
+    Returns dict with:
+        - document: filename
+        - issues: list of repeated word findings with location info
+        - total_issues: count of issues found
+    """
+    from docx import Document
+
+    doc = Document(str(doc_path))
+    issues = []
+
+    def check_paragraph(para_text: str, location: str):
+        repeated = find_repeated_words(para_text, min_word_length)
+        for r in repeated:
+            issues.append({
+                "location": location,
+                "word": r["word"],
+                "count": r["count"],
+                "context": r["context"],
+                "full_match": r["full_match"]
+            })
+
+    # Check body paragraphs
+    for para_idx, para in enumerate(doc.paragraphs):
+        if para.text.strip():
+            check_paragraph(para.text, f"Body, Paragraph {para_idx + 1}")
+
+    # Check tables
+    for table_idx, table in enumerate(doc.tables):
+        for row_idx, row in enumerate(table.rows):
+            for col_idx, cell in enumerate(row.cells):
+                for para in cell.paragraphs:
+                    if para.text.strip():
+                        location = f"Table {table_idx + 1}, Row {row_idx + 1}, Col {col_idx + 1}"
+                        check_paragraph(para.text, location)
+
+    # Check headers/footers
+    for section_idx, section in enumerate(doc.sections):
+        for header in [section.header, section.first_page_header, section.even_page_header]:
+            if header:
+                for para in header.paragraphs:
+                    if para.text.strip():
+                        check_paragraph(para.text, f"Header (Section {section_idx + 1})")
+        for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+            if footer:
+                for para in footer.paragraphs:
+                    if para.text.strip():
+                        check_paragraph(para.text, f"Footer (Section {section_idx + 1})")
+
+    return {
+        "document": doc_path.name,
+        "issues": issues,
+        "total_issues": len(issues)
+    }
+
+
+# =============================================================================
 # DOCUMENT PROCESSOR
 # =============================================================================
 
@@ -1170,6 +1287,38 @@ def cmd_verify(config: Config, export_format: str = None):
                     status = "UNCHANGED"
                 print(f"  {term:<40} {orig_count:>10} {draft_count:>10} {status:>12}")
 
+    # Check for repeated words (e.g., "Knox Knox")
+    print("\n" + "-" * 40)
+    print("CHECKING FOR REPEATED WORDS")
+    print("-" * 40)
+
+    repeated_word_issues = []
+    for draft_path in drafts:
+        result = check_document_for_repeated_words(draft_path)
+        if result["total_issues"] > 0:
+            repeated_word_issues.extend([
+                {**issue, "document": result["document"]}
+                for issue in result["issues"]
+            ])
+
+    if repeated_word_issues:
+        print(f"\n  WARNING: Found {len(repeated_word_issues)} repeated word issues:")
+        for issue in repeated_word_issues[:20]:  # Show first 20
+            print(f"\n    Document: {issue['document']}")
+            print(f"    Location: {issue['location']}")
+            print(f"    Issue:    '{issue['full_match']}'")
+            print(f"    Context:  ...{issue['context']}...")
+        if len(repeated_word_issues) > 20:
+            print(f"\n    ... and {len(repeated_word_issues) - 20} more issues")
+
+        # Add to verification results
+        verification_results["repeated_words"] = repeated_word_issues
+        verification_results["summary"]["repeated_word_count"] = len(repeated_word_issues)
+    else:
+        print("\n  OK: No repeated words found")
+        verification_results["repeated_words"] = []
+        verification_results["summary"]["repeated_word_count"] = 0
+
     # Save verification results
     config.ensure_dirs()
     json_path = config.output_dir / f"verification_{timestamp}.json"
@@ -1193,6 +1342,18 @@ def cmd_verify(config: Config, export_format: str = None):
             report_lines.append(f"  [{total:3d}x] {term}")
             for occ in occurrences:
                 report_lines.append(f"         - {occ['document']}: {occ['count']} occurrences")
+
+    # Add repeated words section
+    if verification_results.get("repeated_words"):
+        report_lines.append(f"\n" + "-" * 40)
+        report_lines.append("REPEATED WORDS FOUND")
+        report_lines.append("-" * 40)
+        report_lines.append(f"\nTotal repeated word issues: {len(verification_results['repeated_words'])}")
+        for issue in verification_results["repeated_words"]:
+            report_lines.append(f"\n  Document: {issue['document']}")
+            report_lines.append(f"  Location: {issue['location']}")
+            report_lines.append(f"  Issue:    '{issue['full_match']}'")
+            report_lines.append(f"  Context:  ...{issue['context']}...")
 
     report_lines.append("\n" + "=" * 80)
     report_lines.append("END OF REPORT")

@@ -275,6 +275,41 @@ def find_repeated_words(text: str, min_word_length: int = 2) -> list:
     return results
 
 
+def fix_repeated_words(text: str, min_word_length: int = 2) -> tuple:
+    """
+    Fix adjacent repeated words in text (e.g., 'Knox Knox' -> 'Knox').
+
+    Returns tuple of (fixed_text, list of fixes made).
+    Each fix is a dict with: word, original, position
+    """
+    if not text:
+        return text, []
+
+    fixes = []
+
+    # Pattern to find repeated words (case-insensitive)
+    # This handles 2+ repetitions: "Knox Knox" or "Knox Knox Knox"
+    def replace_repeated(match):
+        word = match.group(1)
+        full_match = match.group(0)
+        fixes.append({
+            "word": word,
+            "original": full_match,
+            "position": match.start()
+        })
+        return word  # Keep just one instance
+
+    # Pattern matches: word followed by one or more repetitions of whitespace + same word
+    pattern = re.compile(
+        r'\b(\w{' + str(min_word_length) + r',})(\s+\1)+\b',
+        re.IGNORECASE
+    )
+
+    fixed_text = pattern.sub(replace_repeated, text)
+
+    return fixed_text, fixes
+
+
 def check_document_for_repeated_words(doc_path: Path, min_word_length: int = 2) -> dict:
     """
     Check a document for repeated adjacent words.
@@ -423,8 +458,12 @@ class DocumentProcessor:
                     for old_text, new_text in replacements:
                         pattern = self.create_pattern(old_text)
                         run_text = pattern.sub(new_text, run_text)
+                    # Fix any repeated words created by replacements (e.g., "Knox Knox" -> "Knox")
+                    run_text, _ = fix_repeated_words(run_text)
                     run.text = run_text
             else:
+                # Fix repeated words in full text too
+                new_full_text, _ = fix_repeated_words(new_full_text)
                 paragraph.text = new_full_text
 
         return changes_made

@@ -877,11 +877,128 @@ class PackageAnalyzer:
 # FONT ANALYSIS AND STANDARDIZATION
 # =============================================================================
 
-def format_font_combo(font_name, size, bold, italic) -> str:
+def get_theme_fonts(document):
+    """
+    Extract theme fonts (major/minor) from document's theme part.
+    Returns (major_font, minor_font) or (None, None) if not found.
+    """
+    try:
+        from lxml import etree
+        pkg = document.part.package
+        for rel in pkg.main_document_part.rels.values():
+            if 'theme' in rel.reltype.lower():
+                theme_part = rel.target_part
+                theme_xml = theme_part.blob
+                root = etree.fromstring(theme_xml)
+                nsmap = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}
+                font_scheme = root.find('.//a:fontScheme', nsmap)
+                if font_scheme is not None:
+                    major = font_scheme.find('.//a:majorFont/a:latin', nsmap)
+                    minor = font_scheme.find('.//a:minorFont/a:latin', nsmap)
+                    major_font = major.get('typeface') if major is not None else None
+                    minor_font = minor.get('typeface') if minor is not None else None
+                    return major_font, minor_font
+    except Exception:
+        pass
+    return None, None
+
+
+# Cache for theme fonts per document (avoid re-parsing XML)
+_theme_font_cache = {}
+
+
+def get_effective_font(run, paragraph, document=None):
+    """
+    Resolve the effective font name and size for a run by tracing the style hierarchy.
+    Returns (font_name, font_size_pt, is_name_inherited, is_size_inherited)
+    """
+    # Start with run's direct font settings
+    font_name = run.font.name
+    font_size = run.font.size.pt if run.font.size else None
+
+    is_name_inherited = font_name is None
+    is_size_inherited = font_size is None
+
+    # If not set on run, try paragraph style
+    if font_name is None or font_size is None:
+        try:
+            para_style = paragraph.style
+            if para_style and para_style.font:
+                if font_name is None and para_style.font.name:
+                    font_name = para_style.font.name
+                if font_size is None and para_style.font.size:
+                    font_size = para_style.font.size.pt
+
+            # Try base style if still not found
+            if (font_name is None or font_size is None) and para_style:
+                base = para_style.base_style
+                while base and (font_name is None or font_size is None):
+                    if base.font:
+                        if font_name is None and base.font.name:
+                            font_name = base.font.name
+                        if font_size is None and base.font.size:
+                            font_size = base.font.size.pt
+                    base = base.base_style
+        except Exception:
+            pass  # Style access can fail in some documents
+
+    # Try document's default style if still not found
+    if (font_name is None or font_size is None) and document:
+        try:
+            # Try the Normal style which is the default paragraph style
+            normal_style = document.styles.get_by_id('Normal', None)
+            if normal_style is None:
+                normal_style = document.styles['Normal']
+            if normal_style and normal_style.font:
+                if font_name is None and normal_style.font.name:
+                    font_name = normal_style.font.name
+                if font_size is None and normal_style.font.size:
+                    font_size = normal_style.font.size.pt
+        except Exception:
+            pass
+
+    # Try theme fonts if still not found
+    if font_name is None and document:
+        try:
+            doc_id = id(document)
+            if doc_id not in _theme_font_cache:
+                _theme_font_cache[doc_id] = get_theme_fonts(document)
+            major_font, minor_font = _theme_font_cache[doc_id]
+            # Use minor (body) font as default for most text
+            if minor_font:
+                font_name = minor_font
+        except Exception:
+            pass
+
+    # Default fallbacks if still not resolved
+    if font_name is None:
+        font_name = "Unknown"
+    if font_size is None:
+        font_size = None  # Keep as None if truly unknown
+
+    return font_name, font_size, is_name_inherited, is_size_inherited
+
+
+def format_font_combo(font_name, size, bold, italic, effective_name=None, effective_size=None) -> str:
     """Format a font combination for display."""
     parts = []
-    parts.append(font_name if font_name else "[inherited]")
-    parts.append(f"{size}pt" if size else "[inherited]")
+
+    # Font name - show effective name with (inherited) marker if applicable
+    if font_name:
+        parts.append(font_name)
+    elif effective_name:
+        parts.append(f"{effective_name} (inherited)")
+    else:
+        parts.append("[unknown]")
+
+    # Font size - show effective size with (inherited) marker if applicable
+    if size:
+        parts.append(f"{size}pt")
+    elif effective_size:
+        parts.append(f"{effective_size}pt (inherited)")
+    else:
+        parts.append("[unknown size]")
+
     if bold is True:
         parts.append("Bold")
     if italic is True:
@@ -901,12 +1018,16 @@ class FontAnalyzer:
         """Analyze all fonts in a single document."""
         doc = Document(str(doc_path))
 
-        # Track font combinations: (name, size, bold, italic) -> {count, samples, locations, location_counts}
+        # Track font combinations: (name, size, bold, italic) -> {count, samples, locations, location_counts, effective_*}
         font_combinations = defaultdict(lambda: {
             "count": 0,
             "samples": [],
             "locations": [],
-            "location_counts": {"body": 0, "table": 0, "header": 0, "footer": 0}
+            "location_counts": {"body": 0, "table": 0, "header": 0, "footer": 0},
+            "effective_font_name": None,
+            "effective_font_size": None,
+            "is_name_inherited": False,
+            "is_size_inherited": False
         })
 
         def process_paragraph(para, location: str, location_type: str):
@@ -922,6 +1043,15 @@ class FontAnalyzer:
                     combo = font_combinations[key]
                     combo["count"] += 1
                     combo["location_counts"][location_type] += 1
+
+                    # Get effective font info (only need to do once per combo)
+                    if combo["effective_font_name"] is None:
+                        eff_name, eff_size, name_inh, size_inh = get_effective_font(run, para, doc)
+                        combo["effective_font_name"] = eff_name
+                        combo["effective_font_size"] = eff_size
+                        combo["is_name_inherited"] = name_inh
+                        combo["is_size_inherited"] = size_inh
+
                     # Store more samples (5) with longer text (100 chars)
                     if len(combo["samples"]) < 5:
                         sample_text = run.text.strip()[:100]
@@ -980,7 +1110,11 @@ class FontAnalyzer:
             "samples": [],
             "locations": [],
             "documents": [],
-            "location_counts": {"body": 0, "table": 0, "header": 0, "footer": 0}
+            "location_counts": {"body": 0, "table": 0, "header": 0, "footer": 0},
+            "effective_font_name": None,
+            "effective_font_size": None,
+            "is_name_inherited": False,
+            "is_size_inherited": False
         })
 
         doc_results = {}
@@ -998,6 +1132,12 @@ class FontAnalyzer:
                 agg["font_size_pt"] = combo_data["font_size_pt"]
                 agg["bold"] = combo_data["bold"]
                 agg["italic"] = combo_data["italic"]
+                # Copy effective font info (only need to set once)
+                if agg["effective_font_name"] is None:
+                    agg["effective_font_name"] = combo_data.get("effective_font_name")
+                    agg["effective_font_size"] = combo_data.get("effective_font_size")
+                    agg["is_name_inherited"] = combo_data.get("is_name_inherited", False)
+                    agg["is_size_inherited"] = combo_data.get("is_size_inherited", False)
                 # Merge location counts
                 for loc_type in ["body", "table", "header", "footer"]:
                     agg["location_counts"][loc_type] += combo_data.get("location_counts", {}).get(loc_type, 0)
@@ -1973,7 +2113,8 @@ def cmd_fonts_interactive(config: Config):
 
         desc = format_font_combo(
             data["font_name"], data["font_size_pt"],
-            data["bold"], data["italic"]
+            data["bold"], data["italic"],
+            data.get("effective_font_name"), data.get("effective_font_size")
         )
         pct = (data["count"] / total_runs) * 100 if total_runs > 0 else 0
 
